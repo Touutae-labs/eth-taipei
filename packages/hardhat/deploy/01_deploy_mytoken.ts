@@ -27,15 +27,15 @@ const deployContracts = async function (hre: HardhatRuntimeEnvironment) {
   console.log(`🔧 MyToken constructor args: [${initialSupply.toString()}, ${maxSupply.toString()}]`);
 
   // 2. Deploy DailySavingsManager
-  console.log(`\n📝 Deploying DailySavingsManager...`);
-  const dailySavingsManagerDeployment = await deploy("DailySavingsManager", {
+  console.log(`\n📝 Deploying YieldSavingsVaultWithRelayer...`);
+  const dailySavingsManagerDeployment = await deploy("YieldSavingsVaultWithRelayer", {
     from: deployer,
-    args: [ENTRY_POINT_ADDRESS],
+    args: [],
     log: true,
     autoMine: true,
   });
-  console.log(`✅ DailySavingsManager deployed at: ${dailySavingsManagerDeployment.address}`);
-  console.log(`🔧 DailySavingsManager constructor args: ["${ENTRY_POINT_ADDRESS}"]`);
+  console.log(`✅ YieldSavingsVaultWithRelayer deployed at: ${dailySavingsManagerDeployment.address}`);
+  console.log(`🔧 YieldSavingsVaultWithRelayer constructor args: ["${ENTRY_POINT_ADDRESS}"]`);
 
   // Network info
   const network = await hre.ethers.provider.getNetwork();

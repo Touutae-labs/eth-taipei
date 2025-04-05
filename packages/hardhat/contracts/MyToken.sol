@@ -8,25 +8,20 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title MyToken
- * @dev Enhanced ERC20 token with:
+ * @dev Modified ERC20 token with:
+ * - Only DailySavingContract can mint tokens
  * - EIP-2612 permit support for gasless approvals
  * - Burning functionality
- * - Pausable transfers for emergencies
- * - Minting with optional cap
- * - Token recovery for accidentally sent tokens
  */
 contract MyToken is ERC20, ERC20Permit, ERC20Burnable, Ownable {
-    // Optional: Maximum token supply cap
+    // Maximum token supply cap
     uint256 public immutable maxSupply;
     
-    // Optional: Tracks last mint timestamp and amount for rate limiting
-    uint256 public lastMintTimestamp;
-    uint256 public mintCooldownPeriod = 1 days;
-    uint256 public maxMintAmountPerPeriod;
-
+    // The only address allowed to mint tokens
+    address public minter;
+    
     // Events
-    event MaxMintAmountUpdated(uint256 newMaxAmount);
-    event MintCooldownUpdated(uint256 newCooldownPeriod);
+    event MinterUpdated(address indexed newMinter);
     event TokensRecovered(address token, address recipient, uint256 amount);
 
     /**
@@ -35,65 +30,41 @@ contract MyToken is ERC20, ERC20Permit, ERC20Burnable, Ownable {
      * @param _maxSupply Maximum possible token supply (0 for unlimited)
      */
     constructor(uint256 initialSupply, uint256 _maxSupply)
-        ERC20("MyToken", "MTK")
-        ERC20Permit("MyToken")
+        ERC20("ZircuitRewardToken", "ZRT")
+        ERC20Permit("ZircuitRewardToken")
         Ownable(msg.sender)
     {
         require(_maxSupply == 0 || initialSupply <= _maxSupply, "Initial supply exceeds maximum");
         maxSupply = _maxSupply;
-        
-        // Set default mint rate limit to 10% of initial supply per day
-        // Only applies if _maxSupply > 0
-        if (_maxSupply > 0) {
-            maxMintAmountPerPeriod = _maxSupply / 10;
-        }
         
         // Mint initial supply to the deployer
         _mint(msg.sender, initialSupply);
     }
 
     /**
-     * @dev Function to mint new tokens with rate limiting
+     * @dev Set the minter address (can only be called by owner)
+     * @param _minter The address that will be allowed to mint tokens
+     */
+    function setMinter(address _minter) external onlyOwner {
+        require(_minter != address(0), "Minter cannot be zero address");
+        minter = _minter;
+        emit MinterUpdated(_minter);
+    }
+
+    /**
+     * @dev Function to mint new tokens (can only be called by the designated minter)
      * @param to The address to mint tokens to
      * @param amount The amount of tokens to mint
      */
-    function mint(address to, uint256 amount) external onlyOwner {
+    function mint(address to, uint256 amount) external {
+        require(msg.sender == minter, "Only minter can mint tokens");
+        
         // Check maximum supply cap if enabled
         if (maxSupply > 0) {
             require(totalSupply() + amount <= maxSupply, "Mint would exceed maximum supply");
-            
-            // Apply rate limiting if configured
-            if (maxMintAmountPerPeriod > 0) {
-                // If cooldown period has passed, reset the counter
-                if (block.timestamp >= lastMintTimestamp + mintCooldownPeriod) {
-                    lastMintTimestamp = block.timestamp;
-                }
-                
-                // Check if mint amount is within the allowed limit
-                require(amount <= maxMintAmountPerPeriod, "Mint amount exceeds rate limit");
-            }
         }
         
-        lastMintTimestamp = block.timestamp;
         _mint(to, amount);
-    }
-    
-    /**
-     * @dev Update the maximum amount that can be minted per period
-     * @param newMaxAmount New maximum mint amount per period
-     */
-    function setMaxMintAmountPerPeriod(uint256 newMaxAmount) external onlyOwner {
-        maxMintAmountPerPeriod = newMaxAmount;
-        emit MaxMintAmountUpdated(newMaxAmount);
-    }
-    
-    /**
-     * @dev Update the cooldown period between large mints
-     * @param newCooldownPeriod New cooldown period in seconds
-     */
-    function setMintCooldownPeriod(uint256 newCooldownPeriod) external onlyOwner {
-        mintCooldownPeriod = newCooldownPeriod;
-        emit MintCooldownUpdated(newCooldownPeriod);
     }
     
     /**

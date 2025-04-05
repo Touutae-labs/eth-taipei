@@ -37,7 +37,7 @@ const config: HardhatUserConfig = {
   },
   networks: {
     zircuit: {
-      url: "https://testnet.zircuit.com", // ✅ Zircuit testnet RPC
+      url: "https://garfield-testnet.zircuit.com/",
       accounts: [deployerPrivateKey],
     },
   },

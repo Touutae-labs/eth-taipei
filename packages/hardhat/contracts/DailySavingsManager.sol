@@ -1,421 +1,208 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "./MyToken.sol";  // Import the MyToken contract
 
-// EIP-7702 interface
-interface IEIP7702 {
-    function tokenData(uint256 tokenId) external view returns (bytes memory);
-    event TokenDataUpdated(uint256 indexed tokenId, bytes data);
-}
-
-// Simple interface for ERC-4337 EntryPoint
-interface IEntryPoint {
-    struct UserOperation {
-        address sender;
-        uint256 nonce;
-        bytes initCode;
-        bytes callData;
-        uint256 callGasLimit;
-        uint256 verificationGasLimit;
-        uint256 preVerificationGas;
-        uint256 maxFeePerGas;
-        uint256 maxPriorityFeePerGas;
-        bytes paymasterAndData;
-        bytes signature;
-    }
-    
-    function handleOps(UserOperation[] calldata ops, address payable beneficiary) external;
-}
-
-/**
- * @title DailySavingsManager
- * @dev A subscription manager for daily savings transfers with ERC-4337 and EIP-7702 support
- */
-contract DailySavingsManager {
+contract DailySavingContract is Ownable(msg.sender), ReentrancyGuard {
     using ECDSA for bytes32;
 
-    struct Subscription {
-        address receiver;
-        uint256 amountPerDay;
+    uint256 public constant BASIS_POINTS = 10000;
+    uint256 public constant PRECISION = 1e18;
+
+    struct SavingPlan {
+        address user;
+        address token;
+        uint256 amountPerInterval;
+        uint256 interval;
         uint256 lastExecuted;
         bool active;
-        uint256 tokenId;        // EIP-7702 token ID (if used)
-        address tokenContract;   // EIP-7702 token contract (if used)
     }
 
-    // Owner of the contract
-    address public owner;
-    // Nonce for EIP-712 signatures
-    mapping(address => uint256) public nonces;
-
-    // User address to subscription details
-    mapping(address => Subscription) public subscriptions;
-    
-    // Authorized relayers
-    mapping(address => bool) public authorizedRelayers;
-    
-    // EntryPoint contract for ERC-4337
-    address public immutable entryPoint;
-    
-    // Domain separator for EIP-712
-    bytes32 public immutable DOMAIN_SEPARATOR;
-    
-    // Type hash for subscription
-    bytes32 public constant SUBSCRIPTION_TYPEHASH = keccak256(
-        "Subscription(address user,address receiver,uint256 amountPerDay,uint256 deadline,uint256 tokenId,address tokenContract,uint256 nonce)"
-    );
-
-    // Events
-    event Subscribed(address indexed user, address indexed receiver, uint256 amount, uint256 tokenId, address tokenContract);
-    event Executed(address indexed user, uint256 amount);
-    event RelayerUpdated(address indexed relayer, bool authorized);
-    event SubscriptionCancelled(address indexed user);
-
-    /**
-     * @dev Constructor sets the EntryPoint and domain separator
-     * @param _entryPoint Address of the ERC-4337 EntryPoint contract
-     */
-    
-    constructor(address _entryPoint) {
-        entryPoint = _entryPoint;
-        owner = msg.sender;
-
-        authorizedRelayers[msg.sender] = true; // Optional: pre-authorize deployer
-
-        DOMAIN_SEPARATOR = keccak256(
-            abi.encode(
-                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-                keccak256(bytes("DailySavingsManager")),
-                keccak256(bytes("1")),
-                block.chainid,
-                address(this)
-            )
-        );
+    struct TokenConfig {
+        uint256 yieldRate; // Annualized yield rate in basis points
+        bool allowed;
     }
 
+    // Gas fee structure
+    struct GasFeeConfig {
+        address feeToken;     // Token used for gas fee payments
+        uint256 baseFee;      // Base fee per execution in feeToken units
+        uint256 percentFee;   // Additional percentage fee in BASIS_POINTS
+        bool active;          // If fee collection is active
+    }
+
+    MyToken public immutable rewardToken;
+    mapping(bytes32 => SavingPlan) public plans;
+    mapping(address => mapping(address => uint256)) public userBalances; // user => token => balance
+    mapping(address => TokenConfig) public tokenConfigs;
+    mapping(address => bool) public relayers;
+    
+    // Tracks relayer gas reimbursements
+    mapping(address => uint256) public relayerRewards;
+    GasFeeConfig public gasFeeConfig;
+
+    event PlanCreated(bytes32 indexed planId, address indexed user, address token, uint256 amountPerInterval, uint256 interval);
+    event PlanExecuted(bytes32 indexed planId, uint256 amountSaved, uint256 reward, uint256 gasFee);
+    event RelayerSet(address relayer, bool active);
+    event TokenConfigured(address token, uint256 yieldRate);
+    event YieldDistributed(address indexed user, uint256 amount);
+    event GasFeeConfigured(address feeToken, uint256 baseFee, uint256 percentFee);
+    event RelayerRewardsCollected(address indexed relayer, uint256 amount);
+
+    constructor(address _rewardToken) {
+        require(_rewardToken != address(0), "Invalid reward token");
+        rewardToken = MyToken(_rewardToken);
+        relayers[msg.sender] = true;
+    }
 
     /**
-     * @dev Modifier to restrict function access to authorized relayers
+     * @dev Initialize the contract as the minter for the reward token
+     * This function should be called after deployment
      */
+    // Track if we're already initialized as minter
+    bool public isMinter = false;
+    
+    function initializeAsMinter() external onlyOwner {
+        require(!isMinter, "Already initialized as minter");
+        
+        // Call the setMinter function on the reward token
+        MyToken(address(rewardToken)).setMinter(address(this));
+        isMinter = true;
+    }
+
+    /**
+     * @dev Configure the gas fee structure for relayers
+     * @param feeToken Token used to pay gas fees
+     * @param baseFee Base fee per execution in token units
+     * @param percentFee Additional percentage fee in BASIS_POINTS
+     */
+    function setGasFeeConfig(address feeToken, uint256 baseFee, uint256 percentFee) external onlyOwner {
+        require(feeToken != address(0), "Invalid fee token");
+        require(percentFee <= BASIS_POINTS, "Percent fee too high");
+        
+        gasFeeConfig = GasFeeConfig({
+            feeToken: feeToken,
+            baseFee: baseFee,
+            percentFee: percentFee,
+            active: true
+        });
+        
+        emit GasFeeConfigured(feeToken, baseFee, percentFee);
+    }
+
+    /**
+     * @dev Toggle gas fee collection
+     * @param active Whether fee collection is active
+     */
+    function toggleGasFeeCollection(bool active) external onlyOwner {
+        gasFeeConfig.active = active;
+    }
+
     modifier onlyRelayer() {
-        require(authorizedRelayers[msg.sender], "Caller not authorized relayer");
-        _;
-    }
-    
-    /**
-     * @dev Modifier to restrict function access to the EntryPoint
-     */
-    modifier onlyEntryPoint() {
-        require(msg.sender == entryPoint, "Caller not EntryPoint");
+        require(relayers[msg.sender], "Not a relayer");
         _;
     }
 
-    /**
-     * @dev Modifier to restrict function access to the contract owner
-     */
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Not owner");
-        _;
+    function setRelayer(address relayer, bool active) external onlyOwner {
+        relayers[relayer] = active;
+        emit RelayerSet(relayer, active);
     }
 
-    /**
-     * @dev Subscribe to daily savings
-     * @param receiver Address to receive the daily transfers
-     * @param amountPerDay Amount to transfer daily
-     */
-    function subscribe(address receiver, uint256 amountPerDay) external {
-        _subscribe(msg.sender, receiver, amountPerDay, 0, address(0));
-    }
-    
-    /**
-     * @dev Subscribe to daily savings with EIP-7702 token binding
-     * @param receiver Address to receive the daily transfers
-     * @param amountPerDay Amount to transfer daily
-     * @param tokenId ID of the EIP-7702 token to bind subscription data to
-     * @param tokenContract Address of the EIP-7702 compliant contract
-     */
-    function subscribeWithToken(
-        address receiver, 
-        uint256 amountPerDay, 
-        uint256 tokenId, 
-        address tokenContract
-    ) external {
-        require(tokenContract != address(0), "Invalid token contract");
-        require(
-            IERC165(tokenContract).supportsInterface(type(IEIP7702).interfaceId), 
-            "Contract does not support EIP-7702"
-        );
-        
-        _subscribe(msg.sender, receiver, amountPerDay, tokenId, tokenContract);
+    function configureToken(address token, uint256 yieldRateBps) external onlyOwner {
+        require(yieldRateBps <= BASIS_POINTS, "Too high");
+        tokenConfigs[token] = TokenConfig({yieldRate: yieldRateBps, allowed: true});
+        emit TokenConfigured(token, yieldRateBps);
     }
 
-    /**
-     * @dev Subscribe with signature (meta-transaction)
-     * @param user User address that will provide the funds
-     * @param receiver Address to receive the daily transfers
-     * @param amountPerDay Amount to transfer daily
-     * @param deadline Expiration timestamp for this signature
-     * @param v ECDSA signature parameter v
-     * @param r ECDSA signature parameter r
-     * @param s ECDSA signature parameter s
-     */
-    function subscribeWithSig(
-        address user,
-        address receiver,
-        uint256 amountPerDay,
+    function createPlanWithPermit(
+        address token,
+        uint256 amount,
+        uint256 intervalSeconds,
         uint256 deadline,
-        uint8 v, bytes32 r, bytes32 s
+        uint8 v,
+        bytes32 r,
+        bytes32 s
     ) external {
-        require(block.timestamp <= deadline, "Expired");
+        require(tokenConfigs[token].allowed, "Token not supported");
+        require(amount > 0 && intervalSeconds > 0, "Invalid params");
 
-        bytes32 hash = keccak256(abi.encodePacked(user, receiver, amountPerDay, deadline));
-        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash));
-        address signer = ecrecover(ethSignedMessageHash, v, r, s);
-        
-        require(signer == user, "Invalid signature");
+        // Permit approval
+        IERC20Permit(token).permit(msg.sender, address(this), amount, deadline, v, r, s);
 
-        _subscribe(user, receiver, amountPerDay, 0, address(0));
-    }
-    
-    /**
-     * @dev Subscribe with EIP-712 signature and token binding
-     * @param user User address that will provide the funds
-     * @param receiver Address to receive the daily transfers
-     * @param amountPerDay Amount to transfer daily
-     * @param deadline Expiration timestamp for this signature
-     * @param tokenId ID of the EIP-7702 token to bind subscription data to
-     * @param tokenContract Address of the EIP-7702 compliant contract
-     * @param signature EIP-712 signature
-     */
-    function subscribeWithEIP712(
-        address user,
-        address receiver,
-        uint256 amountPerDay,
-        uint256 deadline,
-        uint256 tokenId,
-        address tokenContract,
-        bytes memory signature
-    ) external {
-        require(block.timestamp <= deadline, "Expired");
-
-        uint256 currentNonce = nonces[user];
-
-        bytes32 structHash = keccak256(
-            abi.encode(
-                SUBSCRIPTION_TYPEHASH,
-                user,
-                receiver,
-                amountPerDay,
-                deadline,
-                tokenId,
-                tokenContract,
-                currentNonce
-            )
-        );
-
-        
-        bytes32 hash = keccak256(
-            abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash)
-        );
-        
-        address signer = hash.recover(signature);
-        require(signer == user, "Invalid signature");
-        nonces[user]++; // prevent replay
-
-        _subscribe(user, receiver, amountPerDay, tokenId, tokenContract);
-    }
-
-    /**
-     * @dev Internal function to subscribe a user
-     */
-    function _subscribe(
-        address user, 
-        address receiver, 
-        uint256 amountPerDay,
-        uint256 tokenId,
-        address tokenContract
-    ) internal {
-        require(receiver != address(0), "Invalid receiver");
-        require(amountPerDay > 0, "Invalid amount");
-
-        subscriptions[user] = Subscription({
-            receiver: receiver,
-            amountPerDay: amountPerDay,
+        bytes32 planId = keccak256(abi.encodePacked(msg.sender, token, block.timestamp));
+        plans[planId] = SavingPlan({
+            user: msg.sender,
+            token: token,
+            amountPerInterval: amount,
+            interval: intervalSeconds,
             lastExecuted: block.timestamp,
-            active: true,
-            tokenId: tokenId,
-            tokenContract: tokenContract
+            active: true
         });
 
-        emit Subscribed(user, receiver, amountPerDay, tokenId, tokenContract);
+        emit PlanCreated(planId, msg.sender, token, amount, intervalSeconds);
     }
 
-    /**
-     * @dev Cancel subscription
-     */
-    function cancel() external {
-        _cancelSubscription(msg.sender);
-    }
-    
-    /**
-     * @dev Cancel subscription for another user (only callable by authorized relayers)
-     * @param user Address of the user to cancel subscription for
-     */
-    function cancelFor(address user) external onlyRelayer {
-        _cancelSubscription(user);
-    }
-    
-    /**
-     * @dev Internal function to cancel a subscription
-     */
-    function _cancelSubscription(address user) internal {
-        Subscription storage sub = subscriptions[user];
-        require(sub.active, "Not active");
-        sub.active = false;
-        
-        emit SubscriptionCancelled(user);
-    }
+    function executePlan(bytes32 planId) external onlyRelayer nonReentrant {
+        SavingPlan storage plan = plans[planId];
+        require(plan.active, "Plan inactive");
+        require(block.timestamp >= plan.lastExecuted + plan.interval, "Too soon");
 
-    /**
-     * @dev Execute a subscription transfer
-     * @param user User whose subscription to execute
-     * @param tokenAddress Token contract address for the transfer
-     */
-    function execute(address user, address tokenAddress) external {
-        _executeSubscription(user, tokenAddress);
-    }
-    
-    /**
-     * @dev Execute multiple subscription transfers (gas efficient)
-     * @param users Array of users whose subscriptions to execute
-     * @param tokenAddress Token contract address for the transfers
-     */
-    function executeBatch(address[] calldata users, address tokenAddress) external {
-        for (uint i = 0; i < users.length; i++) {
-            _executeSubscription(users[i], tokenAddress);
-        }
-    }
-    
-    /**
-     * @dev Execute subscription using EIP-7702 token data
-     * @param user User whose subscription to execute
-     * @param tokenAddress Token contract address for the transfer
-     */
-    function executeWithTokenData(address user, address tokenAddress) external onlyRelayer {
-        Subscription storage sub = subscriptions[user];
-        require(sub.active, "Not active");
-        require(block.timestamp >= sub.lastExecuted + 1 days, "Too early");
-        require(sub.tokenId > 0 && sub.tokenContract != address(0), "No token binding");
-        
-        // Get subscription data from EIP-7702 token
-        bytes memory tokenData = IEIP7702(sub.tokenContract).tokenData(sub.tokenId);
-        
-        // Validate the token data (e.g., checking permissions, expiration, etc.)
-        require(tokenData.length > 0, "Invalid token data");
-        
-        // Execute the transfer
-        sub.lastExecuted = block.timestamp;
-        IERC20 token = IERC20(tokenAddress);
-        require(token.transferFrom(user, sub.receiver, sub.amountPerDay), "Transfer failed");
-        
-        emit Executed(user, sub.amountPerDay);
-    }
+        TokenConfig memory config = tokenConfigs[plan.token];
+        require(config.allowed, "Token disabled");
 
-    /**
-     * @dev Internal function to execute a subscription
-     */
-    function _executeSubscription(address user, address tokenAddress) internal {
-        Subscription storage sub = subscriptions[user];
-        require(sub.active, "Not active");
-        require(block.timestamp >= sub.lastExecuted + 1 days, "Too early");
+        // Pull from user (allowance must exist)
+        IERC20(plan.token).transferFrom(plan.user, address(this), plan.amountPerInterval);
+        
+        // Calculate reward in rewardToken
+        uint256 yield = (plan.amountPerInterval * config.yieldRate * plan.interval) / (365 days * BASIS_POINTS);
 
-        sub.lastExecuted = block.timestamp;
-
-        IERC20 token = IERC20(tokenAddress);
-        require(token.transferFrom(user, sub.receiver, sub.amountPerDay), "Transfer failed");
-
-        emit Executed(user, sub.amountPerDay);
-    }
-    
-    /**
-     * @dev Set authorization for a relayer
-     * @param relayer Address of the relayer
-     * @param authorized Whether to authorize or deauthorize
-     */
-    function setRelayerAuthorization(address relayer, bool authorized) external onlyOwner {
-        authorizedRelayers[relayer] = authorized;
-        
-        emit RelayerUpdated(relayer, authorized);
-    }
-    
-    /**
-     * @dev Validate a UserOperation for ERC-4337
-     * @param userOp User operation to validate
-     * @param requiredPrefund Amount of ETH required for prefunding
-     * @return validationData Result of validation
-     */
-    function validateUserOp(
-        IEntryPoint.UserOperation calldata userOp, 
-        bytes32 /*userOpHash*/, 
-        uint256 requiredPrefund
-    ) external onlyEntryPoint returns (uint256 validationData) {
-        // Decode calldata to get function selector and parameters
-        (bytes4 selector, bytes memory params) = abi.decode(userOp.callData, (bytes4, bytes));
-        
-        // Perform validation based on the function being called
-        // Return 0 for valid operations or timestamp until which the signature is valid
-        
-        // For simplicity, we'll just validate that the sender has enough ETH for prefunding
-        require(address(this).balance >= requiredPrefund, "Insufficient ETH for gas");
-        
-        // Return 0 to indicate successful validation
-        return 0;
-    }
-    
-    /**
-     * @dev Function to execute arbitrary contract calls (for ERC-4337 compatibility)
-     * @param target Address to call
-     * @param data Call data
-     * @return result Return data from the call
-     */
-    function execute(address target, bytes calldata data) external onlyEntryPoint returns (bytes memory result) {
-        (bool success, bytes memory returnData) = target.call(data);
-        require(success, "Transaction execution failed");
-        return returnData;
-    }
-    
-    /**
-     * @dev Function to get subscription details with payload from EIP-7702 token
-     * @param user User address
-     * @return subscription Subscription details
-     * @return tokenPayload Token payload if available
-     */
-    function getSubscriptionWithPayload(address user) external view returns (
-        Subscription memory subscription,
-        bytes memory tokenPayload
-    ) {
-        subscription = subscriptions[user];
-        
-        // If subscription is bound to a token, get its data
-        if (subscription.tokenId > 0 && subscription.tokenContract != address(0)) {
-            try IEIP7702(subscription.tokenContract).tokenData(subscription.tokenId) returns (bytes memory data) {
-                tokenPayload = data;
-            } catch {
-                // If call fails, return empty bytes
-                tokenPayload = "";
+        // Calculate gas fee (if enabled)
+        uint256 gasFee = 0;
+        if (gasFeeConfig.active) {
+            // Base fee + percentage of saved amount
+            gasFee = gasFeeConfig.baseFee;
+            
+            if (gasFeeConfig.percentFee > 0 && gasFeeConfig.feeToken == plan.token) {
+                // Only apply percentage fee if the fee token is the same as the saving token
+                uint256 percentageFee = (plan.amountPerInterval * gasFeeConfig.percentFee) / BASIS_POINTS;
+                gasFee += percentageFee;
             }
-        } else {
-            tokenPayload = "";
+            
+            // Ensure we don't take more than what was transferred
+            if (gasFee > 0 && gasFee <= plan.amountPerInterval && gasFeeConfig.feeToken == plan.token) {
+                // Credit the relayer
+                relayerRewards[msg.sender] += gasFee;
+            }
         }
-        
-        return (subscription, tokenPayload);
+
+        // Mint reward token directly to user
+        rewardToken.mint(plan.user, yield);
+
+        // Update execution timestamp
+        plan.lastExecuted = block.timestamp;
+
+        emit PlanExecuted(planId, plan.amountPerInterval, yield, gasFee);
+        emit YieldDistributed(plan.user, yield);
     }
-    
+
     /**
-     * @dev Receive function to accept ETH (required for ERC-4337 gas payments)
+     * @dev Allow relayers to collect their accumulated rewards
      */
-    receive() external payable {}
+    function collectRelayerRewards() external nonReentrant {
+        uint256 amount = relayerRewards[msg.sender];
+        require(amount > 0, "No rewards to collect");
+        
+        // Reset rewards before transfer to prevent reentrancy
+        relayerRewards[msg.sender] = 0;
+        
+        // Transfer the fee token to the relayer
+        IERC20(gasFeeConfig.feeToken).transfer(msg.sender, amount);
+        
+        emit RelayerRewardsCollected(msg.sender, amount);
+    }
 }
