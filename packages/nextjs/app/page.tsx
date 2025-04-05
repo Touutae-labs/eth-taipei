@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ethers } from "ethers";
 import { useAccount } from "wagmi";
 import DailySavingContractABI from "~~/abi/DailySavingContract.json";
@@ -8,7 +8,7 @@ import MyTokenABI from "~~/abi/MyToken.json";
 import { notification } from "~~/utils/scaffold-eth";
 
 // Contract addresses - replace with your deployed addresses
-const DAILY_SAVING_CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000000"; // Replace with your contract address
+const DAILY_SAVING_CONTRACT_ADDRESS = "0x7f88a4818b03053cb04d984d4e9abe576afa10d0"; // Replace with your contract address
 
 const Home = () => {
   const { address: connectedAddress } = useAccount();
@@ -18,12 +18,46 @@ const Home = () => {
   const [interval, setInterval] = useState("86400"); // Default: daily (86400 seconds)
   const [isCreating, setIsCreating] = useState(false);
 
+  const [balance, setBalance] = useState("0");
+  const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+
   // Common test tokens - update with tokens on your network
   const commonTokens = [
-    { name: "USDC (Test)", address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" },
-    { name: "DAI (Test)", address: "0x68194a729C2450ad26072b3D33ADaCbcef39D574" },
-    { name: "ZRT", address: "0x0000000000000000000000000000000000000000" }, // Replace with your token address
+    { name: "ZRT", address: "0x4f0dfc7a638AA3f9b26F5aeA7f086526B269d53E" }, // Replace with your token address
   ];
+
+  // Fetch balance of the selected token
+  const fetchBalance = useCallback(
+    async (tokenAddress: string) => {
+      if (!connectedAddress) return;
+
+      setIsLoadingBalance(true);
+
+      try {
+        // Get basic provider
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const signer = await provider.getSigner();
+
+        // Connect directly to the token contract
+        const tokenContract = new ethers.Contract(tokenAddress, MyTokenABI.abi, signer);
+
+        // Fetch balance
+        const balanceWei = await tokenContract.balanceOf(connectedAddress);
+        setBalance(balanceWei);
+      } catch (error) {
+        console.error("Error fetching balance:", error);
+      } finally {
+        setIsLoadingBalance(false);
+      }
+    },
+    [connectedAddress],
+  );
+
+  useEffect(() => {
+    if (token && connectedAddress) {
+      fetchBalance(token);
+    }
+  }, [token, connectedAddress, fetchBalance]);
 
   const handleCreatePlan = async () => {
     if (!connectedAddress || !amount || !interval || !token) return;
@@ -143,6 +177,15 @@ const Home = () => {
                       ))}
                     </select>
                   </div>
+                  {/* Balance Display */}
+                  <div className="flex justify-between items-center">
+                    <span className="label">Balance</span>
+                    {isLoadingBalance ? (
+                      <span className="loading loading-spinner loading-sm"></span>
+                    ) : (
+                      <span>{ethers.formatEther(balance)} ZRT</span>
+                    )}
+                  </div>
 
                   {/* Amount Input */}
                   <div>
@@ -165,6 +208,7 @@ const Home = () => {
                       value={interval}
                       onChange={e => setInterval(e.target.value)}
                     >
+                      <option value="10">10 Seconds</option>
                       <option value="86400">Daily</option>
                       <option value="604800">Weekly</option>
                       <option value="2592000">Monthly</option>

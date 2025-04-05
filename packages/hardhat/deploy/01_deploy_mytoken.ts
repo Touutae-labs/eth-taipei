@@ -10,7 +10,7 @@ const deployContracts = async function (hre: HardhatRuntimeEnvironment) {
 
   // Token args
   const initialSupply = ethers.parseEther("10000000"); // 10 million MTK
-  const maxSupply = ethers.parseEther("10000000"); // Cap at 10 million
+  const maxSupply = ethers.parseEther("10000000000000000000000000"); // Cap at 10 million
   // 1. Deploy MyToken
   console.log(`📝 Deploying MyToken...`);
   const myTokenDeployment = await deploy("MyToken", {

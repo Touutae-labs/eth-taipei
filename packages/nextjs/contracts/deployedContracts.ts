@@ -7,7 +7,7 @@ import { GenericContractsDeclaration } from "~~/utils/scaffold-eth/contract";
 const deployedContracts = {
   48898: {
     DailySavingContract: {
-      address: "0xb5dbFa780ddeA99978319F56343cBeCc4a26199A",
+      address: "0x7f88a4818b03053cb04d984d4e9abe576afa10d0",
       abi: [
         {
           inputs: [
@@ -624,7 +624,7 @@ const deployedContracts = {
       inheritedFunctions: {},
     },
     MyToken: {
-      address: "0x1c1b4D1D79b248EC46Ac25E380A044ea6e312b38",
+      address: "0x4f0dfc7a638AA3f9b26F5aeA7f086526B269d53E",
       abi: [
         {
           inputs: [
