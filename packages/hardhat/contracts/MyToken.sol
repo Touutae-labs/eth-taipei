@@ -15,7 +15,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  * - Minting with optional cap
  * - Token recovery for accidentally sent tokens
  */
-contract MyToken is ERC20Permit, ERC20Burnable, Ownable {
+contract MyToken is ERC20, ERC20Permit, ERC20Burnable, Ownable {
     // Optional: Maximum token supply cap
     uint256 public immutable maxSupply;
     
