@@ -19,7 +19,7 @@
     "lint-staged": "eslint",
     "test": "REPORT_GAS=true hardhat test --network hardhat",
     "verify": "hardhat etherscan-verify",
-    "deploy-token": "hardhat run deploy/01_deploy_mytoken.ts --network zircuit"
+    "deploy-token": "hardhat compile && hardhat clean && hardhat run deploy/01_deploy_mytoken.ts --network zircuit"
   },
   "devDependencies": {
     "@ethersproject/abi": "^5.7.0",

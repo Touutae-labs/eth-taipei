@@ -42,11 +42,12 @@ const config: HardhatUserConfig = {
     },
   },
   etherscan: {
-    // Not officially supported yet by Zircuit (you can verify manually if needed)
-    apiKey: "",
+    enabled: false,
   },
   sourcify: {
-    enabled: false,
+    enabled: true,
+    apiUrl: "https://sourcify.dev/server",
+    browserUrl: "https://repo.sourcify.dev",
   },
 };
 
