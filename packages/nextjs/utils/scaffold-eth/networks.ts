@@ -14,32 +14,11 @@ export type AllowedChainIds = (typeof scaffoldConfig.targetNetworks)[number]["id
 
 // Mapping of chainId to RPC chain name an format followed by alchemy and infura
 export const RPC_CHAIN_NAMES: Record<number, string> = {
-  [chains.mainnet.id]: "eth-mainnet",
-  [chains.goerli.id]: "eth-goerli",
-  [chains.sepolia.id]: "eth-sepolia",
-  [chains.optimism.id]: "opt-mainnet",
-  [chains.optimismGoerli.id]: "opt-goerli",
-  [chains.optimismSepolia.id]: "opt-sepolia",
-  [chains.arbitrum.id]: "arb-mainnet",
-  [chains.arbitrumGoerli.id]: "arb-goerli",
-  [chains.arbitrumSepolia.id]: "arb-sepolia",
-  [chains.polygon.id]: "polygon-mainnet",
-  [chains.polygonMumbai.id]: "polygon-mumbai",
-  [chains.polygonAmoy.id]: "polygon-amoy",
-  [chains.astar.id]: "astar-mainnet",
-  [chains.polygonZkEvm.id]: "polygonzkevm-mainnet",
-  [chains.polygonZkEvmTestnet.id]: "polygonzkevm-testnet",
-  [chains.base.id]: "base-mainnet",
-  [chains.baseGoerli.id]: "base-goerli",
-  [chains.baseSepolia.id]: "base-sepolia",
-  [chains.celo.id]: "celo-mainnet",
-  [chains.celoAlfajores.id]: "celo-alfajores",
+  [48898]: "garfield-zircuit",
 };
 
 export const getAlchemyHttpUrl = (chainId: number) => {
-  return scaffoldConfig.alchemyApiKey && RPC_CHAIN_NAMES[chainId]
-    ? `https://${RPC_CHAIN_NAMES[chainId]}.g.alchemy.com/v2/${scaffoldConfig.alchemyApiKey}`
-    : undefined;
+  return scaffoldConfig.alchemyApiKey && RPC_CHAIN_NAMES[chainId] ? `https://garfield-testnet.zircuit.com/` : undefined;
 };
 
 export const NETWORKS_EXTRA_DATA: Record<string, ChainAttributes> = {
@@ -96,19 +75,7 @@ export const NETWORKS_EXTRA_DATA: Record<string, ChainAttributes> = {
  * Gives the block explorer transaction URL, returns empty string if the network is a local chain
  */
 export function getBlockExplorerTxLink(chainId: number, txnHash: string) {
-  const chainNames = Object.keys(chains);
-
-  const targetChainArr = chainNames.filter(chainName => {
-    const wagmiChain = chains[chainName as keyof typeof chains];
-    return wagmiChain.id === chainId;
-  });
-
-  if (targetChainArr.length === 0) {
-    return "";
-  }
-
-  const targetChain = targetChainArr[0] as keyof typeof chains;
-  const blockExplorerTxURL = chains[targetChain]?.blockExplorers?.default?.url;
+  const blockExplorerTxURL = `https://explorer.garfield-testnet.zircuit.com/`;
 
   if (!blockExplorerTxURL) {
     return "";
@@ -122,13 +89,13 @@ export function getBlockExplorerTxLink(chainId: number, txnHash: string) {
  * Defaults to Etherscan if no (wagmi) block explorer is configured for the network.
  */
 export function getBlockExplorerAddressLink(network: chains.Chain, address: string) {
-  const blockExplorerBaseURL = network.blockExplorers?.default?.url;
+  const blockExplorerBaseURL = `https://explorer.garfield-testnet.zircuit.com/`;
   if (network.id === chains.hardhat.id) {
     return `/blockexplorer/address/${address}`;
   }
 
   if (!blockExplorerBaseURL) {
-    return `https://etherscan.io/address/${address}`;
+    return `https://explorer.garfield-testnet.zircuit.com/${address}`;
   }
 
   return `${blockExplorerBaseURL}/address/${address}`;

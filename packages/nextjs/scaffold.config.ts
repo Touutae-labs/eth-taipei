@@ -1,3 +1,4 @@
+import { defineChain } from "viem";
 import * as chains from "viem/chains";
 
 export type ScaffoldConfig = {
@@ -9,11 +10,29 @@ export type ScaffoldConfig = {
   onlyLocalBurnerWallet: boolean;
 };
 
+export const garfieldZircuit = /*#__PURE__*/ defineChain({
+  id: 48898,
+  name: "Garfield Zircuit",
+  nativeCurrency: { name: "GZ", symbol: "zkETH", decimals: 18 },
+  rpcUrls: {
+    default: {
+      http: ["https://garfield-testnet.zircuit.com"],
+    },
+  },
+  blockExplorers: {
+    default: {
+      name: "Zircuit Explorer",
+      url: "https://explorer.garfield-testnet.zircuit.com/`",
+    },
+  },
+  testnet: false,
+});
+
 export const DEFAULT_ALCHEMY_API_KEY = "oKxs-03sij-U_N0iOlrSsZFr29-IqbuF";
 
 const scaffoldConfig = {
   // The networks on which your DApp is live
-  targetNetworks: [chains.hardhat],
+  targetNetworks: [garfieldZircuit],
 
   // The interval at which your front-end polls the RPC servers for new data
   // it has no effect if you only target the local network (default is 4000)
