@@ -119,7 +119,9 @@ contract DailySavingContract is Ownable(msg.sender), ReentrancyGuard {
         emit TokenConfigured(token, yieldRateBps);
     }
 
-    function createPlanWithPermit(
+    // Add to DailySavingContract
+    function createPlanWithDelegatedPermit(
+        address user,          // The EOA who signed the permit
         address token,
         uint256 amount,
         uint256 intervalSeconds,
@@ -131,12 +133,12 @@ contract DailySavingContract is Ownable(msg.sender), ReentrancyGuard {
         require(tokenConfigs[token].allowed, "Token not supported");
         require(amount > 0 && intervalSeconds > 0, "Invalid params");
 
-        // Permit approval
-        IERC20Permit(token).permit(msg.sender, address(this), amount, deadline, v, r, s);
+        // Permit approval with user as signer but funds come from msg.sender (the smart account)
+        IERC20Permit(token).permit(user, address(this), amount, deadline, v, r, s);
 
         bytes32 planId = keccak256(abi.encodePacked(msg.sender, token, block.timestamp));
         plans[planId] = SavingPlan({
-            user: msg.sender,
+            user: msg.sender,    // The smart account address that will provide funds
             token: token,
             amountPerInterval: amount,
             interval: intervalSeconds,
