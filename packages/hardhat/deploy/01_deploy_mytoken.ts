@@ -33,6 +33,17 @@ const deployContracts = async function (hre: HardhatRuntimeEnvironment) {
 
   console.log(`✅ YieldSavingsVaultWithRelayer deployed at: ${dailySavingsManagerDeployment.address}`);
 
+  // 2. Deploy DailySavingKernel
+  console.log(`\n📝 Deploying DailySavingKernel...`);
+  const dailySavingKernelDeployment = await deploy("DailySavingKernel", {
+    from: deployer,
+    args: [],
+    log: true,
+    autoMine: true,
+  });
+
+  console.log(`✅ DailySavingKernel deployed at: ${dailySavingKernelDeployment.address}`);
+
   // Network info
   const network = await hre.ethers.provider.getNetwork();
   console.log(`\n🌐 Deployed on network: ${network.name} (chainId: ${network.chainId})`);

@@ -7,7 +7,7 @@ import { GenericContractsDeclaration } from "~~/utils/scaffold-eth/contract";
 const deployedContracts = {
   48898: {
     DailySavingContract: {
-      address: "0x7f88a4818b03053cb04d984d4e9abe576afa10d0",
+      address: "0xfbDEcD8c14E3AECB728C1B3944435cFF6FBdE84c",
       abi: [
         {
           inputs: [
@@ -290,6 +290,11 @@ const deployedContracts = {
           inputs: [
             {
               internalType: "address",
+              name: "user",
+              type: "address",
+            },
+            {
+              internalType: "address",
               name: "token",
               type: "address",
             },
@@ -324,7 +329,7 @@ const deployedContracts = {
               type: "bytes32",
             },
           ],
-          name: "createPlanWithPermit",
+          name: "createPlanWithDelegatedPermit",
           outputs: [],
           stateMutability: "nonpayable",
           type: "function",
@@ -618,6 +623,30 @@ const deployedContracts = {
             },
           ],
           stateMutability: "view",
+          type: "function",
+        },
+      ],
+      inheritedFunctions: {},
+    },
+    DailySavingKernel: {
+      address: "0x1a644410a489B9A05554c388e3c117Cd604808C9",
+      abi: [
+        {
+          inputs: [
+            {
+              internalType: "address",
+              name: "dailySavingsAddress",
+              type: "address",
+            },
+            {
+              internalType: "bytes[]",
+              name: "calls",
+              type: "bytes[]",
+            },
+          ],
+          name: "executeBatch",
+          outputs: [],
+          stateMutability: "nonpayable",
           type: "function",
         },
       ],
